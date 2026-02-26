@@ -6,8 +6,8 @@
  *
  * Environment Variables (Cloudflare Dashboard → Workers → Settings → Variables):
  *   GITHUB_TOKEN  — GitHub Personal Access Token (needs "repo" or "contents" scope)
- *   GITHUB_OWNER  — GitHub username or org        e.g. "vikaspatel22062009"
- *   GITHUB_REPO   — Repository name               e.g. "ace-clouds-storage"
+ *   GITHUB_OWNER  — GitHub username or org        
+ *   GITHUB_REPO   — Repository name               
  *   GITHUB_BRANCH — Branch to use (default: "main")
  *
  * Endpoints:
