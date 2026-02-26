@@ -1,308 +1,254 @@
 # ☁️ Ace Clouds
 
-> **A sleek, PWA-ready file manager** — upload, download, browse, and delete files stored in a GitHub repository via a Cloudflare Worker backend and a Cloudflare Pages frontend.
+> **Serverless cloud file storage — powered by Cloudflare Workers + GitHub as a backend.**
 
-![Beta](https://img.shields.io/badge/status-beta-orange?style=flat-square)
-![PWA](https://img.shields.io/badge/PWA-enabled-0891b2?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
+Ace Clouds is a lightweight, fully serverless file manager that uses **GitHub as a storage layer** and **Cloudflare Workers** as the API backend. A clean PWA frontend (hosted on **Cloudflare Pages**) lets you upload, download, browse, and delete files — from any device, with no server to maintain.
 
 ---
 
 ## ✨ Features
 
-- 📤 **Upload / Overwrite** — push any text-based file straight to your GitHub repo
-- 📥 **Download** — fetch and save any stored file with a single click
-- 📂 **Browse All Files** — searchable list with live file count and SHA info
-- 🗑️ **Delete** — permanently remove files with a confirmation guard
-- 📱 **Installable PWA** — works offline, installable on mobile and desktop
-- 🔒 **Proxy-secured** — your GitHub token never touches the browser
+| Feature | Details |
+|---|---|
+| 📤 **Upload / Overwrite** | Send any text-based file directly to your GitHub repo |
+| 📥 **Download** | Fetch any stored file by name and save it locally |
+| 🗂 **Browse All Files** | List every file in your repo with size, SHA, and quick actions |
+| 🗑 **Delete** | Permanently remove files from GitHub via the UI |
+| 🔍 **Search** | Filter your files list in real time |
+| 📱 **PWA** | Installable on Android, iOS, and desktop; works offline (shell only) |
+| 🔒 **Secure** | Your GitHub token lives only in Cloudflare Worker env vars — never in the browser |
+| ⚡ **Zero Cold Start** | Cloudflare's edge network runs the Worker globally |
 
 ---
 
-## 🏗️ Architecture
+## 🏗 Architecture
 
 ```
-Browser (Cloudflare Pages)
+Browser / PWA (Cloudflare Pages)
         │
-        │  fetch /api?...
+        │  fetch("/api?...")
         ▼
-Cloudflare Pages Function  (/functions/api.js)
-        │  proxies request, hides WORKER_URL env var
+Cloudflare Pages Function  ← /functions/api.js  (proxy)
+        │
+        │  forwards request + hides real Worker URL
         ▼
-Cloudflare Worker  (ace-clouds-backend)
-        │  reads/writes via GitHub Contents API
+Cloudflare Worker  ← ace-clouds-backend
+        │
+        │  GitHub REST API v3
         ▼
-GitHub Repository  (your storage bucket)
+GitHub Repository  ← your file storage
 ```
 
-**Files in this repo:**
+**Why a proxy?** The Pages Function keeps your Worker's URL private and handles CORS cleanly, so your GitHub token is never exposed to the client.
 
-| File | Purpose |
-|---|---|
-| `index.html` | Full SPA UI (tabs, cards, log panels) |
-| `script.js` | All client-side logic (fetch, PWA, drag-drop) |
-| `manifest.json` | PWA manifest |
-| `sw.js` | Service worker (cache-first shell, network-first API) |
-| `functions/api.js` | Cloudflare Pages Function — reverse proxy to Worker |
+---
+
+## 📁 Repository Structure
+
+```
+ace-clouds/
+├── index.html              # Main PWA frontend
+├── script.js               # Frontend JS (upload, download, delete, list)
+├── manifest.json           # PWA manifest
+├── sw.js                   # Service Worker (offline shell caching)
+├── functions/
+│   └── api.js              # Cloudflare Pages proxy function
+└── README.md
+```
+
+The **Cloudflare Worker** (`worker.js`) is deployed separately on Cloudflare Workers — it is **not** in this repo's web root.
 
 ---
 
 ## 🚀 Deployment Guide
 
-You need **three things** set up:
+### Prerequisites
 
-1. A **GitHub repo** to store files (can be private)
-2. A **Cloudflare Worker** (the backend)
-3. A **Cloudflare Pages** site (the frontend)
-
----
-
-### Step 1 — Create a GitHub Personal Access Token
-
-1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens**
-2. Click **Generate new token**
-3. Set the scope to the target repository only
-4. Under **Repository permissions**, enable:
-   - `Contents` → **Read and Write**
-5. Copy and save your token — you'll need it in Step 2
+- A [Cloudflare account](https://dash.cloudflare.com) (free tier works)
+- A [GitHub account](https://github.com) with a **dedicated storage repo** (can be private)
+- A GitHub **Personal Access Token** with `repo` (or `contents`) scope
 
 ---
 
-### Step 2 — Deploy the Cloudflare Worker (Backend)
+### Step 1 — Create a GitHub Storage Repository
 
-The Worker handles all GitHub API calls and keeps your token secret.
+1. Go to [github.com/new](https://github.com/new)
+2. Create a new repository (e.g. `ace-clouds-st`) — private is fine
+3. Initialize it with a `README.md` so the `main` branch exists
 
-#### 2a. Create the Worker
+---
+
+### Step 2 — Generate a GitHub Personal Access Token
+
+1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)**
+2. Click **Generate new token (classic)**
+3. Give it a name (e.g. `ace-clouds`)
+4. Select scope: ✅ `repo` (full control of private repositories)
+5. Click **Generate token** — **copy it now**, you won't see it again
+
+---
+
+### Step 3 — Deploy the Cloudflare Worker
 
 1. Log in to [dash.cloudflare.com](https://dash.cloudflare.com)
-2. Go to **Workers & Pages → Create application → Create Worker**
-3. Name it (e.g. `ace-clouds-backend`) and click **Deploy**
-4. Click **Edit code** and replace the default script with the Worker code below
+2. Go to **Workers & Pages → Create → Worker**
+3. Name it (e.g. `ace-clouds`) and click **Deploy**
+4. Click **Edit Code**, paste the entire contents of `worker.js`, then click **Deploy**
 
-#### 2b. Worker Code
+#### Add Environment Variables
 
-```js
-const GITHUB_TOKEN = GITHUB_TOKEN_SECRET; // bound as secret
-const OWNER  = 'your-github-username';
-const REPO   = 'your-storage-repo';
-const BRANCH = 'main';
+In your Worker's dashboard, go to **Settings → Variables → Environment Variables** and add:
 
-const BASE = `https://api.github.com/repos/${OWNER}/${REPO}/contents`;
-const HEADERS = {
-  Authorization: `token ${GITHUB_TOKEN}`,
-  'User-Agent':  'ace-clouds-worker',
-  Accept:        'application/vnd.github+json',
-};
+| Variable | Value | Example |
+|---|---|---|
+| `GITHUB_TOKEN` | Your PAT from Step 2 | `ghp_xxxxxxxxxxxx` |
+| `GITHUB_OWNER` | Your GitHub username or org | `your_github_username` |
+| `GITHUB_REPO` | Storage repo name | `your_repo_name` |
+| `GITHUB_BRANCH` | Branch to use | `main` |
 
-export default {
-  async fetch(req) {
-    const url    = new URL(req.url);
-    const name   = url.searchParams.get('name');
-    const isList = url.searchParams.get('list') === '1';
-    const method = req.method.toUpperCase();
+> ⚠️ **Encrypt all secrets** using the **"Encrypt"** toggle — especially `GITHUB_TOKEN`.
 
-    // ── CORS preflight ────────────────────────────────
-    if (method === 'OPTIONS') {
-      return cors(new Response(null, { status: 204 }));
-    }
-
-    // ── LIST all files ────────────────────────────────
-    if (method === 'GET' && isList) {
-      const r = await fetch(`${BASE}?ref=${BRANCH}`, { headers: HEADERS });
-      if (!r.ok) return cors(new Response(JSON.stringify({ error: await r.text() }), { status: r.status }));
-      const items = await r.json();
-      const files = items
-        .filter(i => i.type === 'file')
-        .map(i => ({ name: i.name, size: i.size, sha: i.sha }));
-      return cors(Response.json(files));
-    }
-
-    if (!name) return cors(new Response('Missing ?name=', { status: 400 }));
-
-    // ── GET single file ───────────────────────────────
-    if (method === 'GET') {
-      const r = await fetch(`${BASE}/${encodeURIComponent(name)}?ref=${BRANCH}`, { headers: HEADERS });
-      if (!r.ok) return cors(new Response(await r.text(), { status: r.status }));
-      const j = await r.json();
-      const content = atob(j.content.replace(/\n/g,''));
-      return cors(new Response(content, { status: 200 }));
-    }
-
-    // ── POST (create / overwrite) ─────────────────────
-    if (method === 'POST') {
-      const body    = await req.text();
-      const encoded = btoa(unescape(encodeURIComponent(body)));
-      // Get existing SHA (needed for updates)
-      let sha;
-      const existing = await fetch(`${BASE}/${encodeURIComponent(name)}?ref=${BRANCH}`, { headers: HEADERS });
-      if (existing.ok) sha = (await existing.json()).sha;
-
-      const payload = { message: `Upload ${name}`, content: encoded, branch: BRANCH, ...(sha && { sha }) };
-      const r = await fetch(`${BASE}/${encodeURIComponent(name)}`, {
-        method: 'PUT',
-        headers: { ...HEADERS, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      return cors(new Response(r.ok ? `"${name}" uploaded successfully.` : await r.text(), { status: r.status }));
-    }
-
-    // ── DELETE ────────────────────────────────────────
-    if (method === 'DELETE') {
-      const existing = await fetch(`${BASE}/${encodeURIComponent(name)}?ref=${BRANCH}`, { headers: HEADERS });
-      if (!existing.ok) return cors(new Response('File not found.', { status: 404 }));
-      const { sha } = await existing.json();
-      const r = await fetch(`${BASE}/${encodeURIComponent(name)}`, {
-        method: 'DELETE',
-        headers: { ...HEADERS, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: `Delete ${name}`, sha, branch: BRANCH }),
-      });
-      return cors(new Response(r.ok ? `"${name}" deleted.` : await r.text(), { status: r.status }));
-    }
-
-    return cors(new Response('Method not allowed', { status: 405 }));
-  },
-};
-
-function cors(res) {
-  const h = new Headers(res.headers);
-  h.set('Access-Control-Allow-Origin', '*');
-  h.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  h.set('Access-Control-Allow-Headers', 'Content-Type');
-  return new Response(res.body, { status: res.status, headers: h });
-}
-```
-
-#### 2c. Add Secrets & Variables to the Worker
-
-1. In your Worker dashboard, go to **Settings → Variables**
-2. Under **Environment Variables**, add:
-   - `GITHUB_TOKEN_SECRET` → your GitHub token from Step 1 *(mark as Secret)*
-3. Update `OWNER`, `REPO`, and `BRANCH` constants in the Worker code to match your GitHub details
-4. Click **Save and Deploy**
-5. Note your Worker URL — it looks like `https://ace-clouds-backend.YOUR-SUBDOMAIN.workers.dev`
+After saving, note your Worker URL: `https://<your-subdomain>.workers.dev`
 
 ---
 
-### Step 3 — Deploy the Frontend on Cloudflare Pages
+### Step 4 — Deploy the Frontend to Cloudflare Pages
 
-#### 3a. Push this repo to GitHub
-
-Make sure all files (`index.html`, `script.js`, `manifest.json`, `sw.js`, `functions/api.js`) are committed and pushed.
-
-#### 3b. Create a Pages project
-
-1. In Cloudflare dashboard, go to **Workers & Pages → Create application → Pages**
-2. Click **Connect to Git** and select your frontend repo
-3. Set the build configuration:
-   - **Framework preset:** None
+1. Go to **Workers & Pages → Create → Pages → Connect to Git**
+2. Connect your GitHub account and select this repository
+3. Configure the build:
+   - **Framework preset:** `None`
    - **Build command:** *(leave empty)*
-   - **Build output directory:** `/` (or wherever your `index.html` lives)
+   - **Build output directory:** `/` *(or leave blank)*
 4. Click **Save and Deploy**
 
-#### 3c. Add the Worker URL as an environment variable
+#### Add the Worker URL as an Environment Variable
 
-1. In your Pages project, go to **Settings → Environment variables**
-2. Add a variable for **Production** (and optionally Preview):
-   - **Variable name:** `WORKER_URL`
-   - **Value:** your full Worker URL, e.g. `https://ace-clouds-backend.YOUR-SUBDOMAIN.workers.dev`
-3. Click **Save**
-4. Go to **Deployments** and click **Retry deployment** to rebuild with the new variable
+After your first deploy, go to **Pages → Your Project → Settings → Environment Variables** and add:
 
----
+| Variable | Value |
+|---|---|
+| `WORKER_URL` | `https://ace-clouds-backend.<your-subdomain>.workers.dev` |
 
-### Step 4 — Update `manifest.json`
+Then go to **Deployments → Retry deployment** (or push a new commit) so the Pages Function picks up the new variable.
 
-Replace the placeholder icon URLs in `manifest.json` with your actual logo URLs:
-
-```json
-"icons": [
-  {
-    "src": "https://your-domain.com/logo-192.png",
-    "sizes": "192x192",
-    "type": "image/png",
-    "purpose": "any maskable"
-  },
-  {
-    "src": "https://your-domain.com/logo-512.png",
-    "sizes": "512x512",
-    "type": "image/png",
-    "purpose": "any maskable"
-  }
-]
-```
+> The Pages Function at `functions/api.js` reads `WORKER_URL` at runtime and proxies all `/api` requests to your Worker — your Worker URL is never exposed to users.
 
 ---
 
-## 🖥️ Using the App
+### Step 5 — Verify
 
-Once deployed, open your Pages URL and you'll see four tabs:
+Open your Pages URL (e.g. `https://ace-clouds.pages.dev`).
 
-### 📤 Upload
-1. Type a filename (e.g. `notes.txt`) or drag-and-drop a file from your device
-2. Paste or type the content, or let it auto-fill from the picked file
-3. Click **Upload File** — the Activity Log shows the result
-
-### 📥 Download
-1. Type the exact filename stored in the repo
-2. Click **Fetch & Download**
-3. A preview card appears — click **Save File** to download it
-
-### 📂 All Files
-- Loads automatically when you open the tab
-- Use the search box to filter by name
-- Click **Download** on any row to save it instantly
-- Click **Delete** → **Delete** to permanently remove a file
-
-### 🗑️ Delete
-1. Type the exact filename to delete
-2. A preview badge confirms the target file
-3. Click **Yes, Delete Permanently** — this cannot be undone
+- ✅ The **All Files** tab should load (empty repo will show "No files found")
+- ✅ Upload a test file — it should appear in your GitHub storage repo
+- ✅ Download it back and verify the content
+- ✅ Delete it and confirm it's removed from GitHub
 
 ---
 
-## 📱 Installing as a PWA
+## ⚙️ API Reference
 
-On supported browsers a **Install App** button appears in the top-right corner. Tap it to install Ace Clouds as a native-like app on your device. The app shell is cached for offline viewing — API calls still require a network connection.
+All requests go through `/api` on your Pages domain (proxied to the Worker).
 
----
+| Method | URL | Description |
+|---|---|---|
+| `GET` | `/api?list=1` | List all files → returns JSON array |
+| `GET` | `/api?name=<filename>` | Download file → returns raw content |
+| `POST` | `/api?name=<filename>` | Upload or overwrite file (body = raw text) |
+| `DELETE` | `/api?name=<filename>` | Delete file permanently |
+| `OPTIONS` | `/api` | CORS preflight |
 
-## 🔧 Local Development
-
-You can run the frontend locally with any static file server:
+### Example — Upload via cURL
 
 ```bash
-# using Python
-python -m http.server 8080
-
-# using Node (npx)
-npx serve .
+curl -X POST "https://your-pages-domain.pages.dev/api?name=hello.txt" \
+  -H "Content-Type: text/plain" \
+  -d "Hello from curl!"
 ```
 
-For local API calls, either point `WORKER` in `script.js` directly to your live Worker URL, or set up [Wrangler](https://developers.cloudflare.com/workers/wrangler/) to run the Worker locally.
+### Example — Download via cURL
+
+```bash
+curl "https://your-pages-domain.pages.dev/api?name=hello.txt"
+```
+
+### Example — List Files via cURL
+
+```bash
+curl "https://your-pages-domain.pages.dev/api?list=1"
+```
+
+### Example — Delete via cURL
+
+```bash
+curl -X DELETE "https://your-pages-domain.pages.dev/api?name=hello.txt"
+```
 
 ---
 
-## 🛡️ Security Notes
+## 🔒 Security Notes
 
-- Your **GitHub token is never exposed to the browser** — it lives only in the Worker as an encrypted secret
-- The Pages Function (`functions/api.js`) acts as a reverse proxy, forwarding requests to the Worker and reading `WORKER_URL` from a server-side environment variable
-- For production use, consider restricting the Worker's CORS `Access-Control-Allow-Origin` to your Pages domain instead of `*`
+- Your **GitHub token** is stored only as an encrypted Cloudflare Worker environment variable — it is never sent to the browser
+- The **Worker URL** is hidden behind the Pages Function proxy
+- Files in a **private GitHub repo** are only accessible through authenticated API calls — not via raw GitHub URLs
+- Consider adding **Cloudflare Access** in front of your Pages site if you want to restrict who can use the UI
 
 ---
 
-## 🗺️ Roadmap
+## 📱 PWA / Install
 
-- [ ] Folder / path support
-- [ ] Binary file uploads (images, PDFs)
-- [ ] File preview pane
-- [ ] Authentication layer
+Ace Clouds is a Progressive Web App. On a supported browser:
+
+- **Android Chrome:** tap the install banner or **⋮ → Add to Home Screen**
+- **iOS Safari:** tap **Share → Add to Home Screen**
+- **Desktop Chrome/Edge:** click the install icon in the address bar
+
+Once installed it caches the app shell for offline viewing. API calls (upload/download/delete) still require a network connection.
+
+---
+
+## 🛠 Local Development
+
+No build step required — it's plain HTML + JS.
+
+```bash
+# Clone the repo
+git clone https://github.com/<your-username>/ace-clouds.git
+cd ace-clouds
+
+# Serve locally (any static server works)
+npx serve .
+# or
+python3 -m http.server 8080
+```
+
+For local testing you'll need to either:
+- Point `const WORKER = '/api'` in `script.js` directly to your Worker URL temporarily, **or**
+- Run the Cloudflare Pages dev server: `npx wrangler pages dev .`
+
+---
+
+## 🤝 Contributing
+
+Pull requests are welcome! For major changes, please open an issue first to discuss what you'd like to change.
+
+1. Fork the repo
+2. Create your branch: `git checkout -b feature/my-feature`
+3. Commit your changes: `git commit -m 'Add my feature'`
+4. Push to the branch: `git push origin feature/my-feature`
+5. Open a Pull Request
 
 ---
 
 ## 📄 License
 
-MIT — free to use, modify, and distribute.
+[MIT](LICENSE) — free to use, modify, and distribute.
 
 ---
 
-<p align="center">Built with ☁️ by <strong>Vikas Patel</strong> · Powered by Cloudflare Workers &amp; GitHub</p>
+<div align="center">
+
+Built with ❤️ using **Cloudflare Workers** · **Cloudflare Pages** · **GitHub REST API**
+
+</div>
